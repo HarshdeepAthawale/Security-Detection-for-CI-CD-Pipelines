@@ -3,6 +3,7 @@
  * @module server
  */
 
+import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import { logger } from './utils/logger.js'
