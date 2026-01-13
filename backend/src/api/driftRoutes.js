@@ -12,7 +12,7 @@ import { logger } from '../utils/logger.js'
 import { parseLog, validateParsedLog } from '../parsers/logParser.js'
 import { extractFeatures } from '../features/featureExtractor.js'
 import { detectDrift } from '../detector/driftDetector.js'
-import { trainBaselineModel, saveModel, loadModel } from '../model/driftModel.js'
+import { trainModel } from '../utils/mlService.js'
 import { storeAnalysis, getAnalysisHistory, getStatistics, getAnalysesByPipeline } from '../utils/storage.js'
 import { formatDriftAnalysis, generateReport, generatePipelineComparison } from '../report/reportGenerator.js'
 
@@ -100,10 +100,10 @@ router.post('/analyze', async (req, res) => {
       })
     }
 
-    // Step 3: Detect drift
+    // Step 3: Detect drift using ML service
     let analysis
     try {
-      analysis = detectDrift(features, {
+      analysis = await detectDrift(features, {
         pipelineName,
       })
       analysis.timestamp = logTimestamp
@@ -276,45 +276,28 @@ router.post('/train', async (req, res) => {
       })
     }
 
-    // Train model
-    let model
+    // Train ML model using Python service
+    let trainingResult
     try {
-      model = trainBaselineModel(featureVectors, {
-        pipelineName: modelName || 'default',
-      })
+      trainingResult = await trainModel(featureVectors)
     } catch (error) {
-      logger.error(`Model training failed: ${error.message}`)
+      logger.error(`ML model training failed: ${error.message}`)
       return res.status(500).json({
         error: 'Training failed',
         message: error.message,
       })
     }
 
-    // Save model
-    const modelFileName = modelName 
-      ? `${modelName}-model.json` 
-      : 'baseline-model.json'
-    
-    try {
-      const modelPath = join(__dirname, '..', '..', 'data', 'models', modelFileName)
-      saveModel(model, modelPath)
-    } catch (error) {
-      logger.error(`Model save failed: ${error.message}`)
-      return res.status(500).json({
-        error: 'Model save failed',
-        message: error.message,
-      })
-    }
-
-    logger.info(`Model trained successfully: ${model.baselineRunCount} runs, ${Object.keys(model.features).length} features`)
+    logger.info(`ML model trained successfully: ${trainingResult.model_version}, runs=${trainingResult.baseline_run_count}`)
 
     res.status(200).json({
       status: 'success',
       modelName: modelName || 'baseline-model',
-      trainedAt: model.trainedAt,
-      baselineRunCount: model.baselineRunCount,
-      features: Object.keys(model.features).length,
+      trainedAt: trainingResult.trained_at,
+      baselineRunCount: trainingResult.baseline_run_count,
+      features: featureVectors[0]?.length || 17,
       processedLogs: featureVectors.length,
+      modelVersion: trainingResult.model_version,
       errors: errors.length > 0 ? errors : undefined,
     })
 
@@ -569,10 +552,10 @@ router.post('/pipeline-logs/:filename/process', async (req, res) => {
       })
     }
 
-    // Step 3: Detect drift
+    // Step 3: Detect drift using ML service
     let analysis
     try {
-      analysis = detectDrift(features, {
+      analysis = await detectDrift(features, {
         pipelineName,
       })
       analysis.timestamp = logTimestamp

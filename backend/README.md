@@ -61,6 +61,11 @@ backend/
    LOG_LEVEL=INFO              # Log level (DEBUG, INFO, WARN, ERROR)
    MONGODB_URI=mongodb://localhost:27017/security-drift  # MongoDB connection string
    MONGODB_DB_NAME=security-drift  # Database name (optional, can be in URI)
+   
+   # ML Service Configuration
+   ML_SERVICE_URL=http://localhost:5000  # Python ML service URL
+   ML_SERVICE_TIMEOUT=5000               # Request timeout in ms
+   ML_SERVICE_RETRY_ATTEMPTS=3          # Number of retry attempts
    ```
    
    For MongoDB Atlas (cloud):
@@ -75,32 +80,66 @@ backend/
    npm run dev
    ```
 
+## ML Service Dependency
+
+**Important**: This backend requires the Python ML service to be running. The ML service handles all drift detection using Isolation Forest algorithm.
+
+**Start ML Service First**:
+```bash
+# From project root
+cd ml-service
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 5000
+```
+
+Or use Docker Compose (see root `docker-compose.yml`):
+```bash
+docker-compose up ml-service
+```
+
 ## API Endpoints
 
 - `GET /` - API information
 - `GET /health` - Health check endpoint
-- `POST /api/analyze` - Analyze CI/CD log for security drift
+- `POST /api/analyze` - Analyze CI/CD log for security drift (uses ML service)
 - `GET /api/history` - Get analysis history and timeline data
 - `GET /api/pipelines/:pipelineName` - Get pipeline comparison data (baseline vs current)
-- `POST /api/train` - Train/retrain baseline model
+- `POST /api/train` - Train/retrain ML model (sends data to ML service)
 
-## Training Baseline Model
+## Training ML Model
 
-Before the system can detect drift, you need to train a baseline model. The baseline model represents the "normal" or "secure" state of your CI/CD pipeline.
+Before the system can detect drift, you need to train the ML model. The model learns the "normal" or "secure" state of your CI/CD pipeline.
 
-### Quick Start: Train Initial Baseline
+**Prerequisites**:
+- ML service must be running on port 5000
+- At least 2 baseline pipeline logs are required
 
-Use the provided script to train a baseline model from sample data:
+### Quick Start: Train Initial Model
+
+**Option 1: Using API Endpoint**
+
+Send baseline logs to the training endpoint:
 
 ```bash
-node src/scripts/train-baseline.js
+curl -X POST http://localhost:3001/api/train \
+  -H "Content-Type: application/json" \
+  -d '{
+    "baselineLogs": [
+      { /* baseline log 1 */ },
+      { /* baseline log 2 */ }
+    ]
+  }'
 ```
 
-This will:
-1. Load `backend/data/logs/sample-baseline.json`
-2. Process and extract features from the baseline log
-3. Train a statistical baseline model
-4. Save the model to `backend/data/models/baseline-model.json`
+**Option 2: Using Training Script** (if updated)
+
+The training script needs to be updated to work with ML service. For now, use the API endpoint directly.
+
+**What happens**:
+1. Backend extracts features from baseline logs
+2. Feature vectors are sent to ML service (`/train` endpoint)
+3. ML service trains Isolation Forest model
+4. Model is saved to `ml-service/models/baseline_model.pkl`
 
 ### Training Custom Baseline
 

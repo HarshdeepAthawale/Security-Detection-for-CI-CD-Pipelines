@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./ml-service/models:/app/models
+    environment:
+      - PORT=5000
+      - HOST=0.0.0.0
+      - MODEL_PATH=./models
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - FRONTEND_URL=http://localhost:3000
+      - NODE_ENV=production
+      - LOG_LEVEL=INFO
+      - MONGODB_URI=mongodb://mongodb:27017/security-drift
+      - ML_SERVICE_URL=http://ml-service:5000
+      - ML_SERVICE_TIMEOUT=5000
+      - ML_SERVICE_RETRY_ATTEMPTS=3
+    depends_on:
+      - ml-service
+      - mongodb
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:

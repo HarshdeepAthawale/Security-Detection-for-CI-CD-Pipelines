@@ -5,7 +5,7 @@
 
 import { logger } from '../utils/logger.js'
 import { getFeatureNames, validateFeatures, getFeatureCount } from '../features/featureExtractor.js'
-import { loadModel, validateModel } from '../model/driftModel.js'
+import { predictDrift } from '../utils/mlService.js'
 import { randomUUID } from 'crypto'
 
 // Feature weights for drift score calculation
@@ -274,97 +274,187 @@ function mapToSecurityIssue(featureName, zScore, currentValue, baselineMean) {
 }
 
 /**
- * Detect drift in a new pipeline run
+ * Detect drift in a new pipeline run using ML service
  * @param {number[]} featureVector - Feature vector from new run
  * @param {Object} options - Detection options
- * @param {string} options.modelPath - Path to baseline model (optional)
- * @param {Object} options.model - Baseline model object (optional, overrides modelPath)
  * @param {string} options.pipelineName - Name of the pipeline (optional)
- * @returns {Object} Drift analysis result
- * @throws {Error} If feature vector or model is invalid
+ * @returns {Promise<Object>} Drift analysis result
+ * @throws {Error} If feature vector is invalid or ML service fails
  */
-export function detectDrift(featureVector, options = {}) {
+export async function detectDrift(featureVector, options = {}) {
   // Validate feature vector
   if (!validateFeatures(featureVector)) {
     throw new Error(`Invalid feature vector: expected ${getFeatureCount()} features`)
   }
 
-  // Load model
-  let model
-  if (options.model) {
-    model = options.model
-  } else {
-    // Use default path if modelPath is not provided
-    const modelPath = options.modelPath || undefined
-    try {
-      model = loadModel(modelPath)
-    } catch (error) {
-      throw new Error(`Failed to load baseline model: ${error.message}`)
+  logger.info('Detecting drift using ML service')
+
+  try {
+    // Call ML service for prediction
+    const mlResult = await predictDrift(featureVector)
+
+    // Extract drift score and risk level from ML service response
+    const driftScore = mlResult.drift_score
+    const riskLevel = mlResult.risk_level
+
+    // Generate security issues based on drift score and feature vector
+    // Since ML model doesn't provide per-feature explanations, we'll generate
+    // issues based on the overall drift score and feature values
+    const securityIssues = generateSecurityIssuesFromML(featureVector, driftScore, riskLevel)
+    const explanations = generateExplanationsFromML(featureVector, driftScore, mlResult)
+
+    logger.info(`ML drift detection complete: score=${driftScore.toFixed(2)}, risk=${riskLevel}, issues=${securityIssues.length}`)
+
+    // Build result object
+    const result = {
+      id: randomUUID(),
+      pipelineName: options.pipelineName || 'unknown',
+      driftScore,
+      riskLevel,
+      timestamp: new Date().toISOString(),
+      issues: securityIssues,
+      explanations,
+      anomalyScore: mlResult.anomaly_score,
+      isAnomaly: mlResult.is_anomaly,
+      featureVector,
     }
+
+    return result
+  } catch (error) {
+    logger.error(`ML drift detection failed: ${error.message}`)
+    throw new Error(`Drift detection failed: ${error.message}`)
   }
+}
 
-  // Validate model
-  if (!validateModel(model)) {
-    throw new Error('Invalid baseline model')
-  }
-
-  logger.info('Detecting drift against baseline model')
-
+/**
+ * Generate security issues from ML prediction results
+ * @param {number[]} featureVector - Feature vector
+ * @param {number} driftScore - Drift score from ML
+ * @param {string} riskLevel - Risk level
+ * @returns {Array} Array of security issue objects
+ */
+function generateSecurityIssuesFromML(featureVector, driftScore, riskLevel) {
+  const issues = []
   const featureNames = getFeatureNames()
-  const zScores = {}
+
+  // Only generate issues if drift score indicates a problem
+  if (driftScore < 30) {
+    return issues // Low risk, no issues
+  }
+
+  // Analyze feature vector for security concerns
+  // Check for common security issues based on feature values
+
+  // Check for missing security scans
+  const securityScanCount = featureVector[0] // securityScanCount
+  const securityStepCount = featureVector[1] // securityStepCount
+  if (securityScanCount === 0 || securityStepCount === 0) {
+    issues.push({
+      id: randomUUID(),
+      type: 'security_scan_removed',
+      severity: driftScore >= 70 ? 'critical' : driftScore >= 50 ? 'high' : 'medium',
+      description: `No security scan steps detected in pipeline`,
+      step: 'security-scan',
+    })
+  }
+
+  // Check for permission escalation
+  const adminPermissionCount = featureVector[4] // adminPermissionCount
+  const permissionEscalation = featureVector[8] // permissionEscalation
+  if (adminPermissionCount > 0 || permissionEscalation === 1) {
+    issues.push({
+      id: randomUUID(),
+      type: 'permission_escalation',
+      severity: driftScore >= 70 ? 'critical' : 'high',
+      description: `Admin permissions or permission escalation detected`,
+      step: 'permissions',
+    })
+  }
+
+  // Check for secrets exposure
+  const secretsUsageCount = featureVector[5] // secretsUsageCount
+  const secretsWithWriteCount = featureVector[13] // secretsWithWriteCount
+  if (secretsWithWriteCount > 0) {
+    issues.push({
+      id: randomUUID(),
+      type: 'secrets_exposure',
+      severity: driftScore >= 70 ? 'critical' : 'high',
+      description: `Secrets used with write permissions detected`,
+      step: 'secrets',
+    })
+  } else if (secretsUsageCount > 0 && driftScore >= 50) {
+    issues.push({
+      id: randomUUID(),
+      type: 'secrets_exposure',
+      severity: 'medium',
+      description: `Secrets usage pattern detected`,
+      step: 'secrets',
+    })
+  }
+
+  // Check for approval bypass
+  const approvalStepCount = featureVector[6] // approvalStepCount
+  if (approvalStepCount === 0 && driftScore >= 50) {
+    issues.push({
+      id: randomUUID(),
+      type: 'approval_bypassed',
+      severity: driftScore >= 70 ? 'high' : 'medium',
+      description: `No manual approval steps detected`,
+      step: 'approval',
+    })
+  }
+
+  // Check for execution order issues
+  const securityBeforeDeploy = featureVector[15] // securityBeforeDeploy
+  if (securityBeforeDeploy === 0 && securityStepCount > 0 && driftScore >= 50) {
+    issues.push({
+      id: randomUUID(),
+      type: 'execution_order_changed',
+      severity: 'medium',
+      description: `Security steps may not be executed before deployment`,
+      step: 'execution-order',
+    })
+  }
+
+  return issues
+}
+
+/**
+ * Generate explanations from ML prediction
+ * @param {number[]} featureVector - Feature vector
+ * @param {number} driftScore - Drift score
+ * @param {Object} mlResult - ML service result
+ * @returns {Array} Array of explanation strings
+ */
+function generateExplanationsFromML(featureVector, driftScore, mlResult) {
   const explanations = []
-  const securityIssues = []
+  const featureNames = getFeatureNames()
 
-  // Calculate z-scores for each feature
-  for (let i = 0; i < featureNames.length; i++) {
-    const featureName = featureNames[i]
-    const currentValue = featureVector[i]
-    const baselineFeature = model.features[featureName]
-
-    if (!baselineFeature) {
-      logger.warn(`Feature ${featureName} not found in baseline model, skipping`)
-      continue
-    }
-
-    const mean = baselineFeature.mean
-    const stdDev = baselineFeature.stdDev
-    const zScore = calculateZScore(currentValue, mean, stdDev)
-    zScores[featureName] = zScore
-
-    // Generate explanation for significant deviations
-    if (Math.abs(zScore) >= Z_SCORE_THRESHOLDS.NORMAL) {
-      const explanation = generateFeatureExplanation(featureName, zScore, currentValue, mean)
-      explanations.push(explanation)
-      logger.debug(`Feature ${featureName}: z-score=${zScore.toFixed(2)}, ${explanation}`)
-    }
-
-    // Map to security issue
-    const issue = mapToSecurityIssue(featureName, zScore, currentValue, mean)
-    if (issue) {
-      securityIssues.push(issue)
-    }
+  explanations.push(`ML model detected drift score of ${driftScore.toFixed(2)} (${mlResult.risk_level} risk)`)
+  
+  if (mlResult.is_anomaly) {
+    explanations.push(`Pipeline classified as anomaly (anomaly score: ${mlResult.anomaly_score.toFixed(4)})`)
   }
 
-  // Calculate drift score
-  const driftScore = calculateDriftScore(zScores)
-  const riskLevel = calculateRiskLevel(driftScore)
+  // Add feature-based explanations for significant values
+  const significantFeatures = []
+  featureNames.forEach((name, index) => {
+    const value = featureVector[index]
+    // Flag features that might indicate security issues
+    if (name === 'securityScanCount' && value === 0) {
+      significantFeatures.push(`${name}: ${value} (no security scans)`)
+    } else if (name === 'adminPermissionCount' && value > 0) {
+      significantFeatures.push(`${name}: ${value} (admin permissions detected)`)
+    } else if (name === 'secretsWithWriteCount' && value > 0) {
+      significantFeatures.push(`${name}: ${value} (secrets with write permissions)`)
+    }
+  })
 
-  logger.info(`Drift detection complete: score=${driftScore.toFixed(2)}, risk=${riskLevel}, issues=${securityIssues.length}`)
-
-  // Build result object
-  const result = {
-    id: randomUUID(),
-    pipelineName: options.pipelineName || 'unknown',
-    driftScore,
-    riskLevel,
-    timestamp: new Date().toISOString(),
-    issues: securityIssues,
-    explanations,
-    zScores,
-    featureVector,
+  if (significantFeatures.length > 0) {
+    explanations.push(`Notable features: ${significantFeatures.join(', ')}`)
   }
 
-  return result
+  return explanations
 }
 
 /**
