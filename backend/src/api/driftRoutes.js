@@ -52,51 +52,77 @@ router.post('/analyze', async (req, res) => {
       }
     }
 
-    // Validate required fields
+    // Accept any JSON format - log can be any structure
     if (!log) {
       return res.status(400).json({
         error: 'Invalid request',
-        message: 'Missing required field: log',
+        message: 'Missing required field: log. Please provide a JSON object with your CI/CD pipeline data.',
       })
     }
 
-    // Use provided pipeline name or extract from log
-    const pipelineName = pipeline || log.pipeline || log.pipelineName || 'unknown-pipeline'
-    const logTimestamp = timestamp || log.timestamp || new Date().toISOString()
+    // Validate that log is an object (not array, string, etc.)
+    if (typeof log !== 'object' || log === null || Array.isArray(log)) {
+      return res.status(400).json({
+        error: 'Invalid request',
+        message: 'Log must be a JSON object. Arrays and other types are not supported.',
+      })
+    }
 
-    logger.info(`Analyzing pipeline: ${pipelineName}`)
+    logger.info(`Analyzing pipeline log (any format accepted)`)
 
-    // Step 1: Parse log
+    // Step 1: Parse log using universal parser
     let parsedLog
+    let detectedFormat = 'unknown'
     try {
       parsedLog = parseLog(log)
+      
+      // Extract detected format if available (from universal parser)
+      if (parsedLog.detectedFormat) {
+        detectedFormat = parsedLog.detectedFormat
+        delete parsedLog.detectedFormat // Remove from result
+      }
+      
+      // Use provided pipeline name/timestamp or let parser extract them
+      const pipelineName = pipeline || parsedLog.pipeline || 'unknown-pipeline'
+      const logTimestamp = timestamp || parsedLog.timestamp || new Date().toISOString()
+      
       parsedLog.pipeline = pipelineName
       parsedLog.timestamp = logTimestamp
+      
+      logger.info(`Parsed ${detectedFormat} format pipeline: ${pipelineName} (${parsedLog.steps.length} steps)`)
     } catch (error) {
       logger.error(`Log parsing failed: ${error.message}`)
       return res.status(400).json({
         error: 'Invalid log format',
-        message: `Failed to parse log: ${error.message}`,
+        message: `Failed to parse log: ${error.message}. Please ensure your JSON is valid and contains pipeline data.`,
+        hint: 'We support GitHub Actions, GitLab CI, Jenkins, Azure DevOps, CircleCI, and generic JSON formats.',
       })
     }
 
-    // Validate parsed log
+    // Validate parsed log (lenient validation)
     if (!validateParsedLog(parsedLog)) {
       return res.status(400).json({
         error: 'Invalid log format',
-        message: 'Parsed log validation failed',
+        message: 'Could not extract meaningful pipeline data from the provided JSON.',
+        hint: 'Please ensure your JSON contains pipeline steps, jobs, or similar workflow data.',
       })
     }
 
-    // Step 2: Extract features
+    // Step 2: Extract features (robust to missing data)
     let features
     try {
       features = extractFeatures(parsedLog)
+      
+      // Warn if no steps were found
+      if (parsedLog.steps.length === 0) {
+        logger.warn(`No steps extracted from pipeline ${parsedLog.pipeline}, using zero feature vector`)
+      }
     } catch (error) {
       logger.error(`Feature extraction failed: ${error.message}`)
       return res.status(500).json({
         error: 'Feature extraction failed',
-        message: error.message,
+        message: `Failed to extract features: ${error.message}`,
+        hint: 'The log was parsed but feature extraction failed. Please check that your pipeline data contains actionable steps.',
       })
     }
 
@@ -104,7 +130,7 @@ router.post('/analyze', async (req, res) => {
     let analysis
     try {
       analysis = await detectDrift(features, {
-        pipelineName,
+        pipelineName: parsedLog.pipeline,
       })
       analysis.timestamp = logTimestamp
       // Store parsed steps for pipeline comparison
@@ -140,7 +166,7 @@ router.post('/analyze', async (req, res) => {
     // Step 6: Format response with trend
     const response = formatDriftAnalysis(analysis, recentHistory)
 
-    logger.info(`Analysis complete: score=${analysis.driftScore}, risk=${analysis.riskLevel}`)
+    logger.info(`Analysis complete: pipeline=${parsedLog.pipeline}, format=${detectedFormat}, score=${analysis.driftScore}, risk=${analysis.riskLevel}`)
 
     res.status(200).json(response)
 
@@ -518,37 +544,52 @@ router.post('/pipeline-logs/:filename/process', async (req, res) => {
 
     logger.info(`Processing pipeline log file: ${filename} for pipeline: ${pipelineName}`)
 
-    // Step 1: Parse log
+    // Step 1: Parse log using universal parser
     let parsedLog
     try {
       parsedLog = parseLog(logData)
-      parsedLog.pipeline = pipelineName
-      parsedLog.timestamp = logTimestamp
+      
+      // Use provided pipeline name/timestamp or let parser extract them
+      const extractedPipelineName = parsedLog.pipeline || pipelineName || 'unknown-pipeline'
+      const extractedTimestamp = parsedLog.timestamp || logTimestamp || new Date().toISOString()
+      
+      parsedLog.pipeline = extractedPipelineName
+      parsedLog.timestamp = extractedTimestamp
+      
+      logger.info(`Parsed pipeline log file: ${filename} (${parsedLog.steps.length} steps)`)
     } catch (error) {
       logger.error(`Log parsing failed: ${error.message}`)
       return res.status(400).json({
         error: 'Invalid log format',
         message: `Failed to parse log: ${error.message}`,
+        hint: 'We support GitHub Actions, GitLab CI, Jenkins, Azure DevOps, CircleCI, and generic JSON formats.',
       })
     }
 
-    // Validate parsed log
+    // Validate parsed log (lenient validation)
     if (!validateParsedLog(parsedLog)) {
       return res.status(400).json({
         error: 'Invalid log format',
-        message: 'Parsed log validation failed',
+        message: 'Could not extract meaningful pipeline data from the provided JSON.',
+        hint: 'Please ensure your JSON contains pipeline steps, jobs, or similar workflow data.',
       })
     }
 
-    // Step 2: Extract features
+    // Step 2: Extract features (robust to missing data)
     let features
     try {
       features = extractFeatures(parsedLog)
+      
+      // Warn if no steps were found
+      if (parsedLog.steps.length === 0) {
+        logger.warn(`No steps extracted from file ${filename}, using zero feature vector`)
+      }
     } catch (error) {
       logger.error(`Feature extraction failed: ${error.message}`)
       return res.status(500).json({
         error: 'Feature extraction failed',
-        message: error.message,
+        message: `Failed to extract features: ${error.message}`,
+        hint: 'The log was parsed but feature extraction failed. Please check that your pipeline data contains actionable steps.',
       })
     }
 
@@ -556,9 +597,9 @@ router.post('/pipeline-logs/:filename/process', async (req, res) => {
     let analysis
     try {
       analysis = await detectDrift(features, {
-        pipelineName,
+        pipelineName: parsedLog.pipeline,
       })
-      analysis.timestamp = logTimestamp
+      analysis.timestamp = parsedLog.timestamp
       analysis.parsedSteps = parsedLog.steps || []
     } catch (error) {
       logger.error(`Drift detection failed: ${error.message}`)
@@ -582,7 +623,7 @@ router.post('/pipeline-logs/:filename/process', async (req, res) => {
 
     // Step 5: Format response
     const recentHistory = await getAnalysisHistory({
-      pipeline: pipelineName,
+      pipeline: parsedLog.pipeline,
       limit: 10,
     })
     const response = formatDriftAnalysis(analysis, recentHistory)

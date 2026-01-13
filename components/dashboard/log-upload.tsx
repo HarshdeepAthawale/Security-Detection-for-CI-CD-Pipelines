@@ -40,68 +40,32 @@ export function LogUploadDialog({ children }: LogUploadDialogProps) {
   const router = useRouter()
   const { toast } = useToast()
 
-  const validateLogFormat = (log: any): ValidationError | null => {
-    // Check if it's an object
-    if (!log || typeof log !== "object" || Array.isArray(log)) {
-      return { message: "Log must be a JSON object" }
-    }
-
-    // Check required fields
-    if (!log.pipeline || typeof log.pipeline !== "string") {
-      return { field: "pipeline", message: "Missing or invalid 'pipeline' field (must be a string)" }
-    }
-
-    if (!log.timestamp || typeof log.timestamp !== "string") {
-      return { field: "timestamp", message: "Missing or invalid 'timestamp' field (must be an ISO 8601 string)" }
-    }
-
-    // Validate timestamp format (basic check)
+  const validateJsonSyntax = (content: string): ValidationError | null => {
+    // Only validate JSON syntax - any format is accepted
     try {
-      new Date(log.timestamp)
-    } catch {
-      return { field: "timestamp", message: "Invalid timestamp format. Use ISO 8601 format (e.g., 2024-01-15T10:00:00.000Z)" }
-    }
-
-    if (!log.steps || !Array.isArray(log.steps)) {
-      return { field: "steps", message: "Missing or invalid 'steps' field (must be an array)" }
-    }
-
-    if (log.steps.length === 0) {
-      return { field: "steps", message: "Steps array cannot be empty" }
-    }
-
-    // Validate each step
-    for (let i = 0; i < log.steps.length; i++) {
-      const step = log.steps[i]
-      if (!step || typeof step !== "object") {
-        return { field: `steps[${i}]`, message: `Step ${i + 1} must be an object` }
+      const parsed = JSON.parse(content)
+      // Just check it's a valid JSON (object or array)
+      if (parsed === null || (typeof parsed !== "object" && !Array.isArray(parsed))) {
+        return { message: "JSON must be an object or array" }
       }
-
-      if (!step.name || typeof step.name !== "string") {
-        return { field: `steps[${i}].name`, message: `Step ${i + 1} is missing or has invalid 'name' field` }
-      }
-
-      if (!step.type || typeof step.type !== "string") {
-        return { field: `steps[${i}].type`, message: `Step ${i + 1} is missing or has invalid 'type' field` }
-      }
-
-      if (!step.permissions || !Array.isArray(step.permissions)) {
-        return { field: `steps[${i}].permissions`, message: `Step ${i + 1} is missing or has invalid 'permissions' field (must be an array)` }
-      }
-
-      if (step.executionOrder === undefined || typeof step.executionOrder !== "number") {
-        return { field: `steps[${i}].executionOrder`, message: `Step ${i + 1} is missing or has invalid 'executionOrder' field (must be a number)` }
+      return null
+    } catch (e) {
+      return {
+        message: `Invalid JSON syntax: ${e instanceof Error ? e.message : "Unknown error"}`,
       }
     }
-
-    return null
   }
 
   const parseAndValidate = (content: string): { log: any; error: ValidationError | null } => {
+    // Only validate JSON syntax - backend will handle format detection
+    const error = validateJsonSyntax(content)
+    if (error) {
+      return { log: null, error }
+    }
+    
     try {
       const log = JSON.parse(content)
-      const error = validateLogFormat(log)
-      return { log, error }
+      return { log, error: null }
     } catch (e) {
       return {
         log: null,
@@ -214,16 +178,17 @@ export function LogUploadDialog({ children }: LogUploadDialogProps) {
         return
       }
 
-      // Submit to API
+      // Submit to API - send raw log, backend will extract fields
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          pipeline: log.pipeline,
           log: log,
-          timestamp: log.timestamp,
+          // Include pipeline/timestamp if present, but not required
+          ...(log.pipeline && { pipeline: log.pipeline }),
+          ...(log.timestamp && { timestamp: log.timestamp }),
         }),
       })
 
@@ -234,9 +199,10 @@ export function LogUploadDialog({ children }: LogUploadDialogProps) {
       }
 
       // Success
+      const pipelineName = data.pipelineName || log.pipeline || "pipeline"
       toast({
         title: "Analysis Complete",
-        description: `Pipeline "${log.pipeline}" analyzed successfully. Drift score: ${data.driftScore}`,
+        description: `Pipeline "${pipelineName}" analyzed successfully. Drift score: ${data.driftScore}`,
       })
 
       // Close dialog and reset
@@ -297,7 +263,7 @@ export function LogUploadDialog({ children }: LogUploadDialogProps) {
         <DialogHeader className="flex-shrink-0">
           <DialogTitle>Upload CI/CD Log</DialogTitle>
           <DialogDescription>
-            Upload a CI/CD pipeline log file or paste JSON data to analyze for security drift.
+            Upload any CI/CD pipeline log file or paste JSON data. We support GitHub Actions, GitLab CI, Jenkins, Azure DevOps, CircleCI, and more.
           </DialogDescription>
         </DialogHeader>
 
@@ -339,14 +305,14 @@ export function LogUploadDialog({ children }: LogUploadDialogProps) {
                 </label>
                 <Textarea
                   id="json-input"
-                  placeholder='{"pipeline": "my-pipeline", "timestamp": "2024-01-15T10:00:00.000Z", "steps": [...]}'
+                  placeholder='Paste any JSON format - we will extract what we can automatically...'
                   value={jsonInput}
                   onChange={(e) => handleJsonInputChange(e.target.value)}
                   disabled={isLoading}
                   className="min-h-[200px] max-h-[300px] font-mono text-sm overflow-y-auto"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Expected format: pipeline name, timestamp (ISO 8601), and steps array with name, type, permissions, and executionOrder.
+                  Any JSON format accepted. We automatically detect and extract pipeline information from GitHub Actions, GitLab CI, Jenkins, Azure DevOps, CircleCI, and other formats.
                 </p>
               </div>
             </TabsContent>
@@ -374,7 +340,7 @@ export function LogUploadDialog({ children }: LogUploadDialogProps) {
           >
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={isLoading || !!validationError}>
+          <Button onClick={handleSubmit} disabled={isLoading || (validationError !== null && validationError.message.includes("Invalid JSON"))}>
             {isLoading ? (
               <>
                 <Spinner className="mr-2 h-4 w-4" />

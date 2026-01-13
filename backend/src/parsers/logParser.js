@@ -1,9 +1,11 @@
 /**
  * Log parser for CI/CD pipeline logs (GitHub Actions style)
+ * Now supports universal parsing for any JSON format
  * @module parsers/logParser
  */
 
 import { logger } from '../utils/logger.js'
+import { parseUniversalLog } from './universalLogParser.js'
 
 /**
  * Security-related keywords for step categorization
@@ -193,14 +195,27 @@ function parseStep(step, executionOrder) {
 }
 
 /**
- * Parse GitHub Actions style CI/CD log
+ * Parse CI/CD log (supports any JSON format)
+ * First tries universal parser, then falls back to standard format for backward compatibility
  * @param {Object|string} logData - Raw log data (JSON object or JSON string)
  * @returns {Object} Parsed log data structure
  * @throws {Error} If log data is invalid or cannot be parsed
  */
 export function parseLog(logData) {
   try {
-    // Handle string input (JSON string)
+    // First, try universal parser (handles any format)
+    try {
+      const universalResult = parseUniversalLog(logData)
+      logger.debug(`Successfully parsed using universal parser (format: ${universalResult.detectedFormat})`)
+      // Remove detectedFormat from result (not part of standard structure)
+      const { detectedFormat, ...result } = universalResult
+      return result
+    } catch (universalError) {
+      logger.debug(`Universal parser failed, trying standard format: ${universalError.message}`)
+      // Fall back to standard format parsing for backward compatibility
+    }
+    
+    // Fallback: Handle string input (JSON string)
     let log
     if (typeof logData === 'string') {
       try {
@@ -214,8 +229,8 @@ export function parseLog(logData) {
       throw new Error('Log data must be a JSON object or JSON string')
     }
     
-    // Validate required fields
-    if (!log.steps && !Array.isArray(log.steps)) {
+    // Validate required fields (lenient - allow missing steps)
+    if (!log.steps || !Array.isArray(log.steps)) {
       logger.warn('Log missing steps array, using empty array')
       log.steps = []
     }
@@ -249,7 +264,7 @@ export function parseLog(logData) {
 }
 
 /**
- * Validate parsed log structure
+ * Validate parsed log structure (lenient validation)
  * @param {Object} parsedLog - Parsed log object
  * @returns {boolean} True if log structure is valid
  */
@@ -258,30 +273,44 @@ export function validateParsedLog(parsedLog) {
     return false
   }
   
-  if (typeof parsedLog.pipeline !== 'string' || !parsedLog.pipeline) {
+  // Pipeline name: allow missing (will be generated)
+  if (parsedLog.pipeline !== undefined && typeof parsedLog.pipeline !== 'string') {
     return false
   }
   
-  if (typeof parsedLog.timestamp !== 'string' || !parsedLog.timestamp) {
+  // Timestamp: allow missing (will use current time)
+  if (parsedLog.timestamp !== undefined && typeof parsedLog.timestamp !== 'string') {
     return false
   }
   
+  // Steps: must be an array (can be empty)
   if (!Array.isArray(parsedLog.steps)) {
     return false
   }
   
-  // Validate each step
+  // If we have steps, validate their structure (lenient)
   for (const step of parsedLog.steps) {
-    if (!step.name || typeof step.name !== 'string') {
-      return false
+    if (!step || typeof step !== 'object') {
+      continue // Skip invalid steps but don't fail validation
     }
-    if (typeof step.executionOrder !== 'number') {
-      return false
+    
+    // Name should be a string (allow missing, will be generated)
+    if (step.name !== undefined && typeof step.name !== 'string') {
+      continue
     }
-    if (!Array.isArray(step.permissions)) {
-      return false
+    
+    // Execution order should be a number (allow missing, will use index)
+    if (step.executionOrder !== undefined && typeof step.executionOrder !== 'number') {
+      continue
+    }
+    
+    // Permissions should be an array (allow missing, will default to empty)
+    if (step.permissions !== undefined && !Array.isArray(step.permissions)) {
+      continue
     }
   }
   
+  // Validation passes if we have at least the basic structure
+  // Even if steps array is empty, we can still process it
   return true
 }

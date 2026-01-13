@@ -328,9 +328,16 @@ export async function detectDrift(featureVector, options = {}) {
 
 /**
  * Generate security issues from ML prediction results
- * @param {number[]} featureVector - Feature vector
- * @param {number} driftScore - Drift score from ML
- * @param {string} riskLevel - Risk level
+ * Note: This function generates issues based on current feature values only.
+ * It does NOT compare against a baseline - the ML model handles anomaly detection.
+ * If you see "decreased from X to Y" messages, they may be from:
+ * 1. A trained baseline model comparing against sample data
+ * 2. Cached/stored analysis data with old format
+ * 3. Frontend comparison against previous analyses
+ * 
+ * @param {number[]} featureVector - Feature vector (current values only)
+ * @param {number} driftScore - Drift score from ML (0-100)
+ * @param {string} riskLevel - Risk level from ML
  * @returns {Array} Array of security issue objects
  */
 function generateSecurityIssuesFromML(featureVector, driftScore, riskLevel) {
@@ -338,6 +345,7 @@ function generateSecurityIssuesFromML(featureVector, driftScore, riskLevel) {
   const featureNames = getFeatureNames()
 
   // Only generate issues if drift score indicates a problem
+  // The ML model has already detected this as an anomaly/drift
   if (driftScore < 30) {
     return issues // Low risk, no issues
   }
@@ -348,13 +356,22 @@ function generateSecurityIssuesFromML(featureVector, driftScore, riskLevel) {
   // Check for missing security scans
   const securityScanCount = featureVector[0] // securityScanCount
   const securityStepCount = featureVector[1] // securityStepCount
-  if (securityScanCount === 0 || securityStepCount === 0) {
+  if (securityScanCount === 0 && driftScore >= 30) {
     issues.push({
       id: randomUUID(),
       type: 'security_scan_removed',
       severity: driftScore >= 70 ? 'critical' : driftScore >= 50 ? 'high' : 'medium',
-      description: `No security scan steps detected in pipeline`,
-      step: 'security-scan',
+      description: `No security scan steps detected (current: ${securityScanCount})`,
+      step: 'securityScanCount',
+    })
+  }
+  if (securityStepCount === 0 && driftScore >= 30) {
+    issues.push({
+      id: randomUUID(),
+      type: 'security_scan_removed',
+      severity: driftScore >= 70 ? 'critical' : driftScore >= 50 ? 'high' : 'medium',
+      description: `No security-related steps detected (current: ${securityStepCount})`,
+      step: 'securityStepCount',
     })
   }
 
@@ -399,8 +416,21 @@ function generateSecurityIssuesFromML(featureVector, driftScore, riskLevel) {
       id: randomUUID(),
       type: 'approval_bypassed',
       severity: driftScore >= 70 ? 'high' : 'medium',
-      description: `No manual approval steps detected`,
-      step: 'approval',
+      description: `No manual approval steps detected (current: ${approvalStepCount})`,
+      step: 'approvalStepCount',
+    })
+  }
+  
+  // Check for security step ratio
+  const totalStepCount = featureVector[9] // totalStepCount
+  const securityStepRatio = featureVector[10] // securityStepRatio
+  if (securityStepRatio === 0 && totalStepCount > 0 && driftScore >= 50) {
+    issues.push({
+      id: randomUUID(),
+      type: 'security_scan_removed',
+      severity: driftScore >= 70 ? 'high' : 'medium',
+      description: `Security step ratio is zero (current: ${securityStepRatio.toFixed(3)})`,
+      step: 'securityStepRatio',
     })
   }
 

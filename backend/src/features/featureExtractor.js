@@ -7,52 +7,77 @@ import { logger } from '../utils/logger.js'
 
 /**
  * Extract numeric features from parsed log data
+ * Robust to missing fields and empty steps
  * @param {Object} parsedLog - Parsed log object from logParser
  * @returns {number[]} Array of numeric features
  * @throws {Error} If parsed log is invalid
  */
 export function extractFeatures(parsedLog) {
-  if (!parsedLog || !parsedLog.steps || !Array.isArray(parsedLog.steps)) {
-    throw new Error('Invalid parsed log: steps array is required')
+  // Robust validation - allow empty steps array
+  if (!parsedLog || typeof parsedLog !== 'object') {
+    throw new Error('Invalid parsed log: must be an object')
   }
   
-  const steps = parsedLog.steps
+  // Default to empty array if steps missing
+  const steps = Array.isArray(parsedLog.steps) ? parsedLog.steps : []
+  
+  // If no steps, return zero features (all zeros)
+  if (steps.length === 0) {
+    logger.warn('No steps found in parsed log, returning zero feature vector')
+    return new Array(getFeatureCount()).fill(0)
+  }
   
   // Feature 1: Security scan steps count
-  const securityScanCount = steps.filter(step => 
-    step.security && 
-    (normalizeStepName(step.name).includes('scan') || 
-     normalizeStepName(step.name).includes('check'))
-  ).length
+  const securityScanCount = steps.filter(step => {
+    if (!step || typeof step !== 'object') return false
+    const stepName = step.name || step.id || ''
+    return step.security === true && 
+           (normalizeStepName(stepName).includes('scan') || 
+            normalizeStepName(stepName).includes('check'))
+  }).length
   
   // Feature 2: Total security-related steps count
-  const securityStepCount = steps.filter(step => step.security === true).length
+  const securityStepCount = steps.filter(step => 
+    step && typeof step === 'object' && step.security === true
+  ).length
   
   // Feature 3: Read permission count
   const readPermissionCount = steps.filter(step => 
-    step.permissions && step.permissions.includes('read')
+    step && typeof step === 'object' &&
+    Array.isArray(step.permissions) && step.permissions.includes('read')
   ).length
   
   // Feature 4: Write permission count
   const writePermissionCount = steps.filter(step => 
-    step.permissions && step.permissions.includes('write')
+    step && typeof step === 'object' &&
+    Array.isArray(step.permissions) && step.permissions.includes('write')
   ).length
   
   // Feature 5: Admin permission count
   const adminPermissionCount = steps.filter(step => 
-    step.permissions && step.permissions.includes('admin')
+    step && typeof step === 'object' &&
+    Array.isArray(step.permissions) && step.permissions.includes('admin')
   ).length
   
   // Feature 6: Secrets usage count
-  const secretsUsageCount = steps.filter(step => step.secrets === true).length
+  const secretsUsageCount = steps.filter(step => 
+    step && typeof step === 'object' && step.secrets === true
+  ).length
   
   // Feature 7: Manual approval steps count
-  const approvalStepCount = steps.filter(step => step.approval === true).length
+  const approvalStepCount = steps.filter(step => 
+    step && typeof step === 'object' && step.approval === true
+  ).length
   
   // Feature 8: Average execution order of security steps
-  const securitySteps = steps.filter(step => step.security === true)
+  const securitySteps = steps.filter(step => 
+    step && typeof step === 'object' && step.security === true
+  )
   const avgSecurityStepOrder = securitySteps.length > 0
-    ? securitySteps.reduce((sum, step) => sum + step.executionOrder, 0) / securitySteps.length
+    ? securitySteps.reduce((sum, step) => {
+        const order = typeof step.executionOrder === 'number' ? step.executionOrder : 0
+        return sum + order
+      }, 0) / securitySteps.length
     : 0
   
   // Feature 9: Permission escalation indicator (0 or 1)
@@ -67,37 +92,55 @@ export function extractFeatures(parsedLog) {
   
   // Feature 12: First security step execution order (normalized)
   const firstSecurityStep = securitySteps.length > 0
-    ? Math.min(...securitySteps.map(s => s.executionOrder))
+    ? Math.min(...securitySteps.map(s => {
+        const order = typeof s.executionOrder === 'number' ? s.executionOrder : 0
+        return order
+      }))
     : 0
   const normalizedFirstSecurityStep = totalStepCount > 0 ? firstSecurityStep / totalStepCount : 0
   
   // Feature 13: Last security step execution order (normalized)
   const lastSecurityStep = securitySteps.length > 0
-    ? Math.max(...securitySteps.map(s => s.executionOrder))
+    ? Math.max(...securitySteps.map(s => {
+        const order = typeof s.executionOrder === 'number' ? s.executionOrder : 0
+        return order
+      }))
     : 0
   const normalizedLastSecurityStep = totalStepCount > 0 ? lastSecurityStep / totalStepCount : 0
   
   // Feature 14: Steps with both secrets and write permissions
   const secretsWithWriteCount = steps.filter(step => 
+    step && typeof step === 'object' &&
     step.secrets === true && 
-    step.permissions && step.permissions.includes('write')
+    Array.isArray(step.permissions) && step.permissions.includes('write')
   ).length
   
   // Feature 15: Steps with admin permissions
   const stepsWithAdminCount = adminPermissionCount
   
   // Feature 16: Security steps before deployment (if deploy steps exist)
-  const deploySteps = steps.filter(step => step.type === 'deploy')
+  const deploySteps = steps.filter(step => 
+    step && typeof step === 'object' && step.type === 'deploy'
+  )
   const firstDeployOrder = deploySteps.length > 0
-    ? Math.min(...deploySteps.map(s => s.executionOrder))
+    ? Math.min(...deploySteps.map(s => {
+        const order = typeof s.executionOrder === 'number' ? s.executionOrder : totalStepCount + 1
+        return order
+      }))
     : totalStepCount + 1
-  const securityBeforeDeploy = securitySteps.filter(step => 
-    step.executionOrder < firstDeployOrder
-  ).length
+  const securityBeforeDeploy = securitySteps.filter(step => {
+    const order = typeof step.executionOrder === 'number' ? step.executionOrder : 0
+    return order < firstDeployOrder
+  }).length
   
   // Feature 17: Average execution order of all steps (normalized)
   const avgStepOrder = totalStepCount > 0
-    ? steps.reduce((sum, step) => sum + step.executionOrder, 0) / totalStepCount
+    ? steps.reduce((sum, step) => {
+        const order = (step && typeof step === 'object' && typeof step.executionOrder === 'number') 
+          ? step.executionOrder 
+          : 0
+        return sum + order
+      }, 0) / totalStepCount
     : 0
   const normalizedAvgStepOrder = totalStepCount > 0 ? avgStepOrder / totalStepCount : 0
   
@@ -146,13 +189,14 @@ function normalizeStepName(name) {
  * @returns {boolean} True if permission escalation is detected
  */
 function detectPermissionEscalation(steps) {
-  if (steps.length < 2) {
+  if (!Array.isArray(steps) || steps.length < 2) {
     return false
   }
   
   // Get permission levels for each step (0 = none, 1 = read, 2 = write, 3 = admin)
   const permissionLevels = steps.map(step => {
-    const perms = step.permissions || []
+    if (!step || typeof step !== 'object') return 0
+    const perms = Array.isArray(step.permissions) ? step.permissions : []
     if (perms.includes('admin')) return 3
     if (perms.includes('write')) return 2
     if (perms.includes('read')) return 1
