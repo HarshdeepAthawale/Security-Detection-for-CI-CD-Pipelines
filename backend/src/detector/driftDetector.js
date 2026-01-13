@@ -294,7 +294,8 @@ export function detectDrift(featureVector, options = {}) {
   if (options.model) {
     model = options.model
   } else {
-    const modelPath = options.modelPath || null
+    // Use default path if modelPath is not provided
+    const modelPath = options.modelPath || undefined
     try {
       model = loadModel(modelPath)
     } catch (error) {

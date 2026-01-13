@@ -1,0 +1,151 @@
+{
+  "pipeline": "production-deployment-pipeline",
+  "timestamp": "2024-12-19T14:30:00.000Z",
+  "steps": [
+    {
+      "name": "checkout-code",
+      "type": "build",
+      "permissions": ["read"],
+      "executionOrder": 1,
+      "status": "success",
+      "description": "Checkout source code from repository"
+    },
+    {
+      "name": "setup-node",
+      "type": "build",
+      "permissions": ["read"],
+      "executionOrder": 2,
+      "status": "success",
+      "description": "Setup Node.js environment"
+    },
+    {
+      "name": "install-dependencies",
+      "type": "build",
+      "permissions": ["read", "write"],
+      "executionOrder": 3,
+      "status": "success",
+      "description": "Install npm packages",
+      "env": {
+        "NPM_TOKEN": "secret_token_placeholder"
+      }
+    },
+    {
+      "name": "run-security-scan",
+      "type": "security",
+      "security": true,
+      "permissions": ["read"],
+      "executionOrder": 4,
+      "status": "success",
+      "description": "Run SAST security scan"
+    },
+    {
+      "name": "dependency-vulnerability-check",
+      "type": "security",
+      "security": true,
+      "permissions": ["read"],
+      "executionOrder": 5,
+      "status": "success",
+      "description": "Check for known vulnerabilities in dependencies"
+    },
+    {
+      "name": "secrets-scan",
+      "type": "security",
+      "security": true,
+      "permissions": ["read"],
+      "executionOrder": 6,
+      "status": "success",
+      "description": "Scan for exposed secrets and credentials",
+      "secrets": true
+    },
+    {
+      "name": "build-application",
+      "type": "build",
+      "permissions": ["read", "write"],
+      "executionOrder": 7,
+      "status": "success",
+      "description": "Build the application"
+    },
+    {
+      "name": "run-unit-tests",
+      "type": "test",
+      "permissions": ["read"],
+      "executionOrder": 8,
+      "status": "success",
+      "description": "Execute unit tests"
+    },
+    {
+      "name": "run-integration-tests",
+      "type": "test",
+      "permissions": ["read"],
+      "executionOrder": 9,
+      "status": "success",
+      "description": "Execute integration tests"
+    },
+    {
+      "name": "code-coverage-check",
+      "type": "test",
+      "permissions": ["read"],
+      "executionOrder": 10,
+      "status": "success",
+      "description": "Verify code coverage thresholds"
+    },
+    {
+      "name": "build-docker-image",
+      "type": "build",
+      "permissions": ["read", "write"],
+      "executionOrder": 11,
+      "status": "success",
+      "description": "Build Docker container image",
+      "env": {
+        "DOCKER_REGISTRY_KEY": "secret_key_placeholder"
+      }
+    },
+    {
+      "name": "push-docker-image",
+      "type": "deploy",
+      "permissions": ["read", "write"],
+      "executionOrder": 12,
+      "status": "success",
+      "description": "Push image to container registry",
+      "secrets": true
+    },
+    {
+      "name": "production-approval-gate",
+      "type": "approval",
+      "approval": true,
+      "permissions": ["read"],
+      "executionOrder": 13,
+      "status": "success",
+      "description": "Manual approval required for production deployment"
+    },
+    {
+      "name": "deploy-to-production",
+      "type": "deploy",
+      "permissions": ["read", "write", "admin"],
+      "executionOrder": 14,
+      "status": "success",
+      "description": "Deploy application to production environment",
+      "env": {
+        "AWS_ACCESS_KEY_ID": "secret_access_key",
+        "AWS_SECRET_ACCESS_KEY": "secret_secret_key"
+      },
+      "secrets": true
+    },
+    {
+      "name": "post-deployment-verification",
+      "type": "test",
+      "permissions": ["read"],
+      "executionOrder": 15,
+      "status": "success",
+      "description": "Verify deployment health and functionality"
+    },
+    {
+      "name": "notify-team",
+      "type": "deploy",
+      "permissions": ["read", "write"],
+      "executionOrder": 16,
+      "status": "success",
+      "description": "Send deployment notification to team"
+    }
+  ]
+}

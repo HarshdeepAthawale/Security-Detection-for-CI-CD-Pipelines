@@ -1,3 +1,10 @@
+export interface ScoreTrend {
+  change: string
+  changePercent: string
+  direction: "up" | "down" | "neutral"
+  previousScore: number
+}
+
 export interface DriftAnalysis {
   id: string
   pipelineName: string
@@ -5,6 +12,7 @@ export interface DriftAnalysis {
   riskLevel: "low" | "medium" | "high" | "critical"
   timestamp: string
   issues: SecurityIssue[]
+  trend: ScoreTrend | null
 }
 
 export interface SecurityIssue {

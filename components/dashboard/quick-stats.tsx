@@ -22,12 +22,12 @@ export function QuickStats({ stats }: QuickStatsProps) {
     }
   }
 
-  const getChangeColor = (type: "positive" | "negative" | "neutral") => {
+  const getChangeStyle = (type: "positive" | "negative" | "neutral") => {
     switch (type) {
       case "positive":
-        return "text-green-500"
+        return "text-muted-foreground font-medium"
       case "negative":
-        return "text-red-500"
+        return "text-foreground font-semibold"
       default:
         return "text-muted-foreground"
     }
@@ -38,13 +38,13 @@ export function QuickStats({ stats }: QuickStatsProps) {
       {stats.map((stat, index) => {
         const Icon = getIcon(stat.icon)
         return (
-          <Card key={index}>
+            <Card key={index}>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <Icon className="h-5 w-5 text-muted-foreground" />
-                <span className={`text-xs ${getChangeColor(stat.changeType)}`}>{stat.change}</span>
+                <span className={`text-xs ${getChangeStyle(stat.changeType)}`}>{stat.change}</span>
               </div>
-              <p className="mt-2 text-2xl font-bold text-foreground">{stat.value}</p>
+              <p className="mt-2 text-2xl font-bold text-foreground tracking-tight">{stat.value}</p>
               <p className="text-sm text-muted-foreground">{stat.label}</p>
             </CardContent>
           </Card>

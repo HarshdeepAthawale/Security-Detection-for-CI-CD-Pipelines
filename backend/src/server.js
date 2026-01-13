@@ -7,6 +7,8 @@ import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import { logger } from './utils/logger.js'
+import { connectDatabase, closeDatabase } from './utils/database.js'
+import driftRoutes from './api/driftRoutes.js'
 
 /**
  * Create and configure Express application
@@ -20,8 +22,10 @@ function createApp() {
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,
   }))
-  app.use(express.json())
-  app.use(express.urlencoded({ extended: true }))
+  
+  // Request body parsing with size limits
+  app.use(express.json({ limit: '10mb' }))
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 
   // Request logging middleware
   app.use((req, res, next) => {
@@ -38,6 +42,9 @@ function createApp() {
     })
   })
 
+  // API routes
+  app.use('/api', driftRoutes)
+
   // Root endpoint
   app.get('/', (req, res) => {
     res.json({
@@ -45,7 +52,9 @@ function createApp() {
       version: '1.0.0',
       endpoints: {
         health: '/health',
-        // API routes will be added in Phase 4
+        analyze: 'POST /api/analyze',
+        history: 'GET /api/history',
+        train: 'POST /api/train',
       },
     })
   })
@@ -73,18 +82,51 @@ function createApp() {
 /**
  * Start the server
  */
-function startServer() {
+async function startServer() {
+  try {
+    // Connect to MongoDB
+    logger.info('Initializing database connection...')
+    await connectDatabase()
+    logger.info('Database connection established')
+  } catch (error) {
+    logger.error('Failed to connect to database:', error.message)
+    logger.warn('Server will start but database operations may fail')
+    logger.warn('Make sure MongoDB is running and MONGODB_URI is set correctly')
+  }
+
   const PORT = process.env.PORT || 3001
   const app = createApp()
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     logger.info(`Security Detection for CI/CD Pipelines API server started`)
     logger.info(`Server running on http://localhost:${PORT}`)
     logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`)
   })
+
+  // Graceful shutdown
+  process.on('SIGTERM', async () => {
+    logger.info('SIGTERM received, shutting down gracefully...')
+    server.close(async () => {
+      await closeDatabase()
+      process.exit(0)
+    })
+  })
+
+  process.on('SIGINT', async () => {
+    logger.info('SIGINT received, shutting down gracefully...')
+    server.close(async () => {
+      await closeDatabase()
+      process.exit(0)
+    })
+  })
+
+  return server
 }
 
 // Start server when this file is executed directly
-startServer()
+startServer().catch(error => {
+  logger.error('Failed to start server:', error)
+  process.exit(1)
+})
 
 export { createApp, startServer }

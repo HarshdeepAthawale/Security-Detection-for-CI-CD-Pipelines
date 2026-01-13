@@ -1,0 +1,33 @@
+{
+  "pipeline": "risky-production-deployment",
+  "timestamp": "2024-12-19T15:00:00.000Z",
+  "steps": [
+    {
+      "name": "checkout-code",
+      "type": "build",
+      "permissions": ["read"],
+      "executionOrder": 1,
+      "status": "success"
+    },
+    {
+      "name": "build-application",
+      "type": "build",
+      "permissions": ["read", "write"],
+      "executionOrder": 2,
+      "status": "success"
+    },
+    {
+      "name": "deploy-directly",
+      "type": "deploy",
+      "permissions": ["read", "write", "admin"],
+      "executionOrder": 3,
+      "status": "success",
+      "description": "Deploy without security scans or approvals - RISKY!",
+      "env": {
+        "AWS_ACCESS_KEY_ID": "AKIAIOSFODNN7EXAMPLE",
+        "AWS_SECRET_ACCESS_KEY": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+      },
+      "secrets": true
+    }
+  ]
+}

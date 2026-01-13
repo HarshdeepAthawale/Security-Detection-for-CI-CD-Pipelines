@@ -13,8 +13,13 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
 // Default model directory (relative to backend directory)
+// __dirname is backend/src/model, so go up 2 levels to backend/, then into data/models
 const MODEL_DIR = join(__dirname, '..', '..', 'data', 'models')
 const DEFAULT_MODEL_PATH = join(MODEL_DIR, 'baseline-model.json')
+
+// Log the resolved path for debugging
+logger.debug(`Model directory: ${MODEL_DIR}`)
+logger.debug(`Default model path: ${DEFAULT_MODEL_PATH}`)
 
 /**
  * Calculate mean of an array of numbers
@@ -142,12 +147,21 @@ export function saveModel(model, filePath = DEFAULT_MODEL_PATH) {
  * @throws {Error} If model file doesn't exist or is invalid
  */
 export function loadModel(filePath = DEFAULT_MODEL_PATH) {
-  if (!existsSync(filePath)) {
-    throw new Error(`Model file does not exist: ${filePath}`)
+  // Use default path if null or undefined is passed
+  const modelPath = filePath || DEFAULT_MODEL_PATH
+  
+  logger.debug(`Loading model from path: ${modelPath}`)
+  logger.debug(`Model file exists: ${existsSync(modelPath)}`)
+  
+  if (!existsSync(modelPath)) {
+    logger.error(`Model file not found at: ${modelPath}`)
+    logger.error(`DEFAULT_MODEL_PATH: ${DEFAULT_MODEL_PATH}`)
+    logger.error(`Current working directory: ${process.cwd()}`)
+    throw new Error(`Model file does not exist: ${modelPath}`)
   }
 
   try {
-    const modelJson = readFileSync(filePath, 'utf-8')
+    const modelJson = readFileSync(modelPath, 'utf-8')
     const model = JSON.parse(modelJson)
     
     // Validate model structure
@@ -155,13 +169,13 @@ export function loadModel(filePath = DEFAULT_MODEL_PATH) {
       throw new Error('Invalid model: features object is required')
     }
 
-    logger.info(`Model loaded from ${filePath}`)
+    logger.info(`Model loaded from ${modelPath}`)
     logger.debug(`Model trained at: ${model.trainedAt}, baseline runs: ${model.baselineRunCount}`)
     
     return model
   } catch (error) {
     if (error.code === 'ENOENT') {
-      throw new Error(`Model file not found: ${filePath}`)
+      throw new Error(`Model file not found: ${modelPath}`)
     }
     if (error instanceof SyntaxError) {
       throw new Error(`Invalid JSON in model file: ${error.message}`)

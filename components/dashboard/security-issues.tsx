@@ -13,13 +13,13 @@ export function SecurityIssues({ issues }: SecurityIssuesProps) {
   const getSeverityIcon = (severity: string) => {
     switch (severity) {
       case "critical":
-        return <ShieldX className="h-4 w-4 text-red-500" />
+        return <ShieldX className="h-4 w-4 text-foreground" />
       case "high":
-        return <ShieldAlert className="h-4 w-4 text-orange-500" />
+        return <ShieldAlert className="h-4 w-4 text-foreground" />
       case "medium":
-        return <AlertTriangle className="h-4 w-4 text-yellow-500" />
+        return <AlertTriangle className="h-4 w-4 text-muted-foreground" />
       case "low":
-        return <Info className="h-4 w-4 text-blue-500" />
+        return <Info className="h-4 w-4 text-muted-foreground" />
       default:
         return <Shield className="h-4 w-4 text-muted-foreground" />
     }
@@ -28,15 +28,15 @@ export function SecurityIssues({ issues }: SecurityIssuesProps) {
   const getSeverityBadge = (severity: string) => {
     switch (severity) {
       case "critical":
-        return "bg-red-500/20 text-red-500 border-red-500/30 hover:bg-red-500/30"
+        return "bg-secondary text-foreground border-foreground/30 hover:bg-secondary/80 font-bold"
       case "high":
-        return "bg-orange-500/20 text-orange-500 border-orange-500/30 hover:bg-orange-500/30"
+        return "bg-secondary/80 text-foreground border-foreground/20 hover:bg-secondary/60 font-semibold"
       case "medium":
-        return "bg-yellow-500/20 text-yellow-500 border-yellow-500/30 hover:bg-yellow-500/30"
+        return "bg-secondary/50 text-muted-foreground border-border hover:bg-secondary/40 font-medium"
       case "low":
-        return "bg-blue-500/20 text-blue-500 border-blue-500/30 hover:bg-blue-500/30"
+        return "bg-secondary/30 text-muted-foreground border-border hover:bg-secondary/20"
       default:
-        return "bg-muted text-muted-foreground"
+        return "bg-secondary/30 text-muted-foreground border-border"
     }
   }
 
